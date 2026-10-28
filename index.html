@@ -133,6 +133,8 @@ const Q=[
 const DL={easy:"ง่าย",mid:"ปานกลาง",hard:"ยาก"};
 const $=id=>document.getElementById(id);
 let tid,AC;
+const rank=d=>d.filter(r=>r.pass||r.total>=600).sort((a,b)=>b.total-a.total||a.at-b.at);
+function upsert(nm,fn){const d=load();let r=d.find(x=>x.name===nm);if(!r){r={name:nm,scores:[],total:0,tries:0,pass:false,done:false,at:Date.now()};d.push(r)}fn(r);save(d);return d}
 function ac(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}return AC}
 function tone(f,d,type,v,t=0){const a=ac();if(!a)return;try{const o=a.createOscillator(),g=a.createGain(),n=a.currentTime+t;o.type=type;o.frequency.value=f;g.gain.setValueAtTime(v,n);g.gain.exponentialRampToValueAtTime(.001,n+d);o.connect(g);g.connect(a.destination);o.start(n);o.stop(n+d)}catch(e){}}
 function buzz(){tone(300,.35,"square",.2,0);tone(220,.35,"square",.2,.4);tone(150,.6,"square",.2,.8)}
@@ -157,7 +159,7 @@ const show=id=>["start","game","result","board"].forEach(s=>$(s).classList.toggl
 const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function anim(c){const h=$("head");h.classList.remove("cheer","oops");void h.offsetWidth;h.classList.add(c);setTimeout(()=>h.classList.remove(c),900)}
 
-$("go").onclick=()=>{name=$("name").value.trim();if(!name){$("name").focus();return}ac();tries=1;begin()};
+$("go").onclick=()=>{name=$("name").value.trim();if(!name){$("name").focus();return}ac();upsert(name,()=>{});tries=1;begin()};
 function begin(){i=0;scores=[];show("game");$("who").textContent="🕷️ "+name;level()}
 function level(){
   locked=false;const [q,o,d]=Q[i];
@@ -189,9 +191,10 @@ $("next").onclick=()=>{if(i<9){i++;level()}else finish()};
 function finish(){
   const t=scores.reduce((a,b)=>a+b,0),pass=t>=600,r=$("result");show("result");
   $("prog").style.width="100%";
+  upsert(name,r=>{r.tries=tries;r.done=true;if(t>=r.total||!r.scores.length){r.scores=scores;r.total=t}r.pass=r.total>=600});
   if(pass){
-    const d=load();d.push({name,scores,total:t,tries,at:Date.now()});save(d);
-    const first=d.slice().sort((a,b)=>b.total-a.total||a.at-b.at)[0]===d[d.length-1];
+    const d=load();
+    const first=rank(d)[0]===d.find(x=>x.name===name);
     r.innerHTML=`<div class="big">🎉 ${t} คะแนน</div><p style="text-align:center;font-size:1.2rem">ผ่านภารกิจแล้ว! สไปเดอร์แมนขอบคุณ ${esc(name)} 🕸️ (เล่นครั้งที่ ${tries})${first?"<br>👑 คุณอยู่อันดับ 1! ดูพลุเลย 🎆":""}</p><div class="row"><button class="alt" id="rb">🏆 ดูตารางคะแนน</button><button id="rn">เล่นคนต่อไป</button></div>`;
     $("rb").onclick=board;$("rn").onclick=()=>{$("name").value="";show("start")};anim("cheer");if(first)fireworks();
   }else{
@@ -201,18 +204,18 @@ function finish(){
 }
 function board(){
   show("board");
-  const d=load().sort((a,b)=>b.total-a.total||a.at-b.at);
-  const st=["⭐⭐⭐","⭐⭐","⭐"];if(d.length)setTimeout(fireworks,300);
-  let h='<table><tr><th>#</th><th>ชื่อ-นามสกุล</th>'+Q.map((_,n)=>"<th>"+(n+1)+"</th>").join("")+'<th>รวม</th></tr>';
-  if(!d.length)h+='<tr><td colspan="13">ยังไม่มีผู้ผ่านภารกิจ</td></tr>';
-  d.forEach((r,n)=>{h+="<tr><td>"+(n+1)+"</td><td>"+(n==0?"👑 ":"")+esc(r.name)+(n<3?' <span class="star">'+st[n]+"</span>":"")+"</td>"+r.scores.map(s=>'<td class="x'+(s?1:0)+'">'+s+"</td>").join("")+"<td><b>"+r.total+"</b></td></tr>"});
+  const all=load(),pr=rank(all),d=pr.concat(all.filter(r=>!pr.includes(r)).sort((a,b)=>b.total-a.total));
+  const st=["⭐⭐⭐","⭐⭐","⭐"];if(pr.length)setTimeout(fireworks,300);
+  let h='<table><tr><th>#</th><th>ชื่อ-นามสกุล</th>'+Q.map((_,n)=>"<th>"+(n+1)+"</th>").join("")+'<th>รวม</th><th>สถานะ</th></tr>';
+  if(!d.length)h+='<tr><td colspan="14">ยังไม่มีผู้เล่น</td></tr>';
+  d.forEach((r,n)=>{const p=n<pr.length,top=p&&n<3,sc=r.scores.length?r.scores.map(s=>'<td class="x'+(s?1:0)+'">'+s+"</td>").join(""):'<td>-</td>'.repeat(10);h+="<tr><td>"+(p?n+1:"-")+"</td><td>"+(p&&n==0?"👑 ":"")+esc(r.name)+(top?' <span class="star">'+st[n]+"</span>":"")+"</td>"+sc+"<td><b>"+r.total+"</b></td><td>"+(p?"✅ ผ่าน":(r.done?"🔁 ยังไม่ผ่าน":"🎮 กำลังเล่น"))+"</td></tr>"});
   $("tbl").innerHTML=h+"</table>";
 }
 $("toBoard").onclick=board;$("back").onclick=()=>show("start");$("fw").onclick=fireworks;
 $("clr").onclick=()=>{if(confirm("ล้างคะแนนทั้งหมด?")){save([]);board()}};
 $("csv").onclick=()=>{
-  const d=load().sort((a,b)=>b.total-a.total);
-  const rows=[["อันดับ","ชื่อ-นามสกุล",...Q.map((_,n)=>"ด่าน"+(n+1)),"รวม"],...d.map((r,n)=>[n+1,'"'+r.name.replace(/"/g,'""')+'"',...r.scores,r.total])];
+  const all=load(),pr=rank(all),d=pr.concat(all.filter(r=>!pr.includes(r)));
+  const rows=[["อันดับ","ชื่อ-นามสกุล",...Q.map((_,n)=>"ด่าน"+(n+1)),"รวม","สถานะ"],...d.map((r,n)=>[n<pr.length?n+1:"-",'"'+r.name.replace(/"/g,'""')+'"',...(r.scores.length?r.scores:Array(10).fill("")),r.total,n<pr.length?"ผ่าน":"ยังไม่ผ่าน"])];
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"}));a.download="scores.csv";a.click();
 };
 </script>
