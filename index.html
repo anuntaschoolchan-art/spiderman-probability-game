@@ -134,7 +134,7 @@ const DL={easy:"ง่าย",mid:"ปานกลาง",hard:"ยาก"};
 const $=id=>document.getElementById(id);
 let tid,AC;
 const rank=d=>d.filter(r=>r.pass||r.total>=600).sort((a,b)=>b.total-a.total||a.at-b.at);
-function upsert(nm,fn){const d=load();let r=d.find(x=>x.name===nm);if(!r){r={name:nm,scores:[],total:0,tries:0,pass:false,done:false,at:Date.now()};d.push(r)}fn(r);save(d);return d}
+function upsert(nm,fn){const d=load();let r=d.find(x=>x.name===nm);if(!r){r={name:nm,scores:[],total:0,tries:0,pass:false,done:false,at:Date.now()};d.push(r)}fn(r);if(DB_URL)push(r);else save(d);return d}
 function ac(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}return AC}
 function tone(f,d,type,v,t=0){const a=ac();if(!a)return;try{const o=a.createOscillator(),g=a.createGain(),n=a.currentTime+t;o.type=type;o.frequency.value=f;g.gain.setValueAtTime(v,n);g.gain.exponentialRampToValueAtTime(.001,n+d);o.connect(g);g.connect(a.destination);o.start(n);o.stop(n+d)}catch(e){}}
 function buzz(){tone(300,.35,"square",.2,0);tone(220,.35,"square",.2,.4);tone(150,.6,"square",.2,.8)}
@@ -153,13 +153,19 @@ function startTimer(){clearInterval(tid);const end=Date.now()+60000,ck=$("clock"
     if(s<=0){clearInterval(tid);buzz();pick(-1,null)}},200)}
 const KEY="spider-prob-board-v1";
 let name="",i=0,scores=[],order=[],locked=false,tries=1;
-const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}};
-const save=d=>{try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}};
+const DB_URL=""; /* ← ใส่ URL Firebase เช่น https://xxxx-default-rtdb.firebaseio.com เพื่อให้ทุกเครื่องเห็นตารางเดียวกัน */
+let CACHE=[],pend=0;
+const load=()=>{if(DB_URL)return CACHE;try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}};
+const dkey=n=>encodeURIComponent(n.replace(/[.$#\[\]\/]/g,"_"));
+async function pull(){if(pend)return;try{const o=await (await fetch(DB_URL+"/players.json")).json();if(!pend)CACHE=o?Object.values(o).map(r=>({...r,scores:r.scores||[]})):[]}catch(e){}}
+function push(r){pend++;fetch(DB_URL+"/players/"+dkey(r.name)+".json",{method:"PUT",body:JSON.stringify(r)}).catch(()=>{}).finally(()=>{pend--})}
+if(DB_URL){pull();setInterval(async()=>{await pull();if(!$("board").classList.contains("hide"))render(false)},3000)}
+const save=d=>{if(DB_URL)return;try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}};
 const show=id=>["start","game","result","board"].forEach(s=>$(s).classList.toggle("hide",s!==id));
 const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function anim(c){const h=$("head");h.classList.remove("cheer","oops");void h.offsetWidth;h.classList.add(c);setTimeout(()=>h.classList.remove(c),900)}
 
-$("go").onclick=()=>{name=$("name").value.trim();if(!name){$("name").focus();return}ac();upsert(name,()=>{});tries=1;begin()};
+$("go").onclick=async()=>{name=$("name").value.trim();if(!name){$("name").focus();return}ac();if(DB_URL)await pull();upsert(name,()=>{});tries=1;begin()};
 function begin(){i=0;scores=[];show("game");$("who").textContent="🕷️ "+name;level()}
 function level(){
   locked=false;const [q,o,d]=Q[i];
@@ -202,17 +208,18 @@ function finish(){
     $("rt").onclick=()=>{tries++;begin()};anim("oops");
   }
 }
-function board(){
+function board(){show("board");(DB_URL?pull():Promise.resolve()).then(()=>render(true))}
+function render(fx){
   show("board");
   const all=load(),pr=rank(all),d=pr.concat(all.filter(r=>!pr.includes(r)).sort((a,b)=>b.total-a.total));
-  const st=["⭐⭐⭐","⭐⭐","⭐"];if(pr.length)setTimeout(fireworks,300);
+  const st=["⭐⭐⭐","⭐⭐","⭐"];if(fx&&pr.length)setTimeout(fireworks,300);
   let h='<table><tr><th>#</th><th>ชื่อ-นามสกุล</th>'+Q.map((_,n)=>"<th>"+(n+1)+"</th>").join("")+'<th>รวม</th><th>สถานะ</th></tr>';
   if(!d.length)h+='<tr><td colspan="14">ยังไม่มีผู้เล่น</td></tr>';
   d.forEach((r,n)=>{const p=n<pr.length,top=p&&n<3,sc=r.scores.length?r.scores.map(s=>'<td class="x'+(s?1:0)+'">'+s+"</td>").join(""):'<td>-</td>'.repeat(10);h+="<tr><td>"+(p?n+1:"-")+"</td><td>"+(p&&n==0?"👑 ":"")+esc(r.name)+(top?' <span class="star">'+st[n]+"</span>":"")+"</td>"+sc+"<td><b>"+r.total+"</b></td><td>"+(p?"✅ ผ่าน":(r.done?"🔁 ยังไม่ผ่าน":"🎮 กำลังเล่น"))+"</td></tr>"});
   $("tbl").innerHTML=h+"</table>";
 }
 $("toBoard").onclick=board;$("back").onclick=()=>show("start");$("fw").onclick=fireworks;
-$("clr").onclick=()=>{if(confirm("ล้างคะแนนทั้งหมด?")){save([]);board()}};
+$("clr").onclick=()=>{if(confirm("ล้างคะแนนทั้งหมด?")){if(DB_URL){fetch(DB_URL+"/players.json",{method:"DELETE"}).then(()=>{CACHE=[];render(true)})}else{save([]);render(true)}}};
 $("csv").onclick=()=>{
   const all=load(),pr=rank(all),d=pr.concat(all.filter(r=>!pr.includes(r)));
   const rows=[["อันดับ","ชื่อ-นามสกุล",...Q.map((_,n)=>"ด่าน"+(n+1)),"รวม","สถานะ"],...d.map((r,n)=>[n<pr.length?n+1:"-",'"'+r.name.replace(/"/g,'""')+'"',...(r.scores.length?r.scores:Array(10).fill("")),r.total,n<pr.length?"ผ่าน":"ยังไม่ผ่าน"])];
